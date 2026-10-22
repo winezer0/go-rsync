@@ -1,0 +1,5 @@
+# 防止 Windows 下 CRLF 转换破坏 Go 汇编与源码
+*.s -text
+*.go text eol=lf
+*.mod text eol=lf
+*.sum text eol=lf

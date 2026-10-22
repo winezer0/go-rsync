@@ -1,0 +1,91 @@
+name: Test & Benchmark
+
+on:
+  push:
+    branches: [main, master, develop]
+  pull_request:
+    branches: [main, master]
+
+jobs:
+  # ── amd64 + windows: vet, test, fuzz ──
+  test:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        go: ['1.25']
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ matrix.go }}
+
+      - name: Vet
+        run: go vet ./...
+
+      - name: Test
+        run: go test -count=1 -timeout=120s ./...
+
+      - name: Fuzz
+        run: |
+          go test -fuzz=FuzzDeltaRoundTrip -fuzztime=10s
+          go test -fuzz=FuzzChecksum1Parity -fuzztime=10s
+          go test -fuzz=FuzzWireSignature -fuzztime=5s
+          go test -fuzz=^FuzzWireInstructions$ -fuzztime=5s
+          go test -fuzz=FuzzWireInstructionsCorrupt -fuzztime=5s
+
+  # ── amd64 benchmark (AVX2/SSE2 vs pure Go) ──
+  bench-amd64:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.25'
+
+      - name: Benchmark AMD64
+        run: |
+          go test -bench='BenchmarkChecksum1' -benchtime=300ms -count=1 ./... 2>&1 | tee bench_amd64.txt
+
+      - name: Upload AMD64 results
+        uses: actions/upload-artifact@v4
+        with:
+          name: bench-amd64
+          path: bench_amd64.txt
+
+  # ── ARM64: vet, test, fuzz, bench (NEON UDOT/VUMULL vs pure Go) ──
+  test-arm64:
+    runs-on: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.25'
+
+      - name: CPU Info
+        run: grep -E 'processor|Features|CPU part|CPU implementer' /proc/cpuinfo | head -5 || true
+
+      - name: Vet
+        run: go vet ./...
+
+      - name: Test
+        run: go test -count=1 -timeout=120s ./...
+
+      - name: Fuzz
+        run: |
+          go test -fuzz=FuzzDeltaRoundTrip -fuzztime=10s
+          go test -fuzz=FuzzChecksum1Parity -fuzztime=10s
+          go test -fuzz=FuzzWireSignature -fuzztime=5s
+          go test -fuzz=^FuzzWireInstructions$ -fuzztime=5s
+          go test -fuzz=FuzzWireInstructionsCorrupt -fuzztime=5s
+
+      - name: Benchmark ARM64
+        run: |
+          go test -bench=BenchmarkMD5x4 -benchtime=300ms -count=1 ./... 2>&1 | tee bench_arm64.txt
+          go test -bench=BenchmarkSignature_NEON -benchtime=300ms -count=1 ./... 2>&1 | tee -a bench_arm64.txt
+
+      - name: Upload ARM64 results
+        uses: actions/upload-artifact@v4
+        with:
+          name: bench-arm64
+          path: bench_arm64.txt
